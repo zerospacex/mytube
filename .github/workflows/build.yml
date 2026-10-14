@@ -2,7 +2,7 @@ name: Build Unsigned iOS IPA & Android APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "*" ]
   workflow_dispatch:
 
 jobs:
@@ -20,28 +20,22 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          cache: true
 
-      - name: Recreate clean iOS & Android scaffolding
+      - name: Create Clean Flutter Project & Build Unsigned IPA
         run: |
-          # Backup custom Info.plist and main.dart if they exist
-          if [ -f "ios/Runner/Info.plist" ]; then
-            cp ios/Runner/Info.plist /tmp/Info.plist.bak
-          fi
+          # 1. Backup your custom Dart code and Info.plist if present
           if [ -f "lib/main.dart" ]; then
             cp lib/main.dart /tmp/main.dart.bak
           fi
+          if [ -f "ios/Runner/Info.plist" ]; then
+            cp ios/Runner/Info.plist /tmp/Info.plist.bak
+          fi
 
-          # Remove incomplete ios/android folders so flutter create builds a fresh Xcode project
-          rm -rf ios android
-
-          # Generate complete native project files
+          # 2. Wipe any broken/partial project files and generate a clean Flutter project
+          rm -rf ios android pubspec.lock
           flutter create --org com.custom.ytadfree --project-name adfree_youtube --platforms=ios,android .
 
-          # Ensure flutter_inappwebview is registered in pubspec.yaml and triggers Podfile generation
-          flutter pub add flutter_inappwebview
-
-          # Restore your custom main.dart and Info.plist
+          # 3. Restore your custom main.dart and Info.plist
           if [ -f "/tmp/main.dart.bak" ]; then
             cp /tmp/main.dart.bak lib/main.dart
           fi
@@ -49,11 +43,14 @@ jobs:
             cp /tmp/Info.plist.bak ios/Runner/Info.plist
           fi
 
-      - name: Build iOS Release (.app bundle without codesigning)
-        run: flutter build ios --release --no-codesign
+          # 4. Add the WebView plugin and resolve packages
+          flutter pub add flutter_inappwebview
+          flutter pub get
 
-      - name: Package .app into Unsigned .ipa
-        run: |
+          # 5. Build the unsigned iOS .app bundle (Flutter automatically generates Podfile & runs pod install here)
+          flutter build ios --release --no-codesign
+
+          # 6. Package the .app into an installable .ipa
           cd build/ios/iphoneos
           mkdir -p Payload
           mv Runner.app Payload/
@@ -85,20 +82,18 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          cache: true
 
-      - name: Recreate clean Android scaffolding
+      - name: Create Clean Flutter Project & Build APK
         run: |
-          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-            cp android/app/src/main/AndroidManifest.xml /tmp/AndroidManifest.xml.bak
-          fi
           if [ -f "lib/main.dart" ]; then
             cp lib/main.dart /tmp/main.dart.bak
           fi
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            cp android/app/src/main/AndroidManifest.xml /tmp/AndroidManifest.xml.bak
+          fi
 
-          rm -rf android
-          flutter create --org com.custom.ytadfree --project-name adfree_youtube --platforms=android .
-          flutter pub add flutter_inappwebview
+          rm -rf ios android pubspec.lock
+          flutter create --org com.custom.ytadfree --project-name adfree_youtube --platforms=ios,android .
 
           if [ -f "/tmp/main.dart.bak" ]; then
             cp /tmp/main.dart.bak lib/main.dart
@@ -107,8 +102,9 @@ jobs:
             cp /tmp/AndroidManifest.xml.bak android/app/src/main/AndroidManifest.xml
           fi
 
-      - name: Build Android APK
-        run: flutter build apk --release
+          flutter pub add flutter_inappwebview
+          flutter pub get
+          flutter build apk --release
 
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
