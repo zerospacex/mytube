@@ -78,13 +78,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-
       - name: Create Clean Flutter Project & Build APK
         run: |
+          # 1. Backup your custom Dart code and AndroidManifest.xml if present
           if [ -f "lib/main.dart" ]; then
             cp lib/main.dart /tmp/main.dart.bak
           fi
@@ -92,9 +88,11 @@ jobs:
             cp android/app/src/main/AndroidManifest.xml /tmp/AndroidManifest.xml.bak
           fi
 
+          # 2. Recreate clean project structure
           rm -rf ios android pubspec.lock
           flutter create --org com.custom.ytadfree --project-name adfree_youtube --platforms=ios,android .
 
+          # 3. Restore your custom main.dart and AndroidManifest.xml
           if [ -f "/tmp/main.dart.bak" ]; then
             cp /tmp/main.dart.bak lib/main.dart
           fi
@@ -102,12 +100,12 @@ jobs:
             cp /tmp/AndroidManifest.xml.bak android/app/src/main/AndroidManifest.xml
           fi
 
+          # 4. Add plugin and download packages to pub-cache
           flutter pub add flutter_inappwebview
           flutter pub get
-          flutter build apk --release
 
-      - name: Upload Android APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Android-Release-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          # 5. FIX AGP 9.0 ERROR: Patch 'proguard-android.txt' -> 'proguard-android-optimize.txt' in pub-cache
+          find ~/.pub-cache -name "build.gradle" -exec sed -i "s/proguard-android.txt/proguard-android-optimize.txt/g" {} +
+
+          # 6. Build the release Android APK
+          flutter build apk --release
