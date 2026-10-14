@@ -47,7 +47,7 @@ jobs:
           flutter pub add flutter_inappwebview
           flutter pub get
 
-          # 5. Build the unsigned iOS .app bundle (Flutter automatically generates Podfile & runs pod install here)
+          # 5. Build the unsigned iOS .app bundle
           flutter build ios --release --no-codesign
 
           # 6. Package the .app into an installable .ipa
@@ -78,6 +78,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
       - name: Create Clean Flutter Project & Build APK
         run: |
           # 1. Backup your custom Dart code and AndroidManifest.xml if present
@@ -104,8 +109,14 @@ jobs:
           flutter pub add flutter_inappwebview
           flutter pub get
 
-          # 5. FIX AGP 9.0 ERROR: Patch 'proguard-android.txt' -> 'proguard-android-optimize.txt' in pub-cache
+          # 5. FIX AGP 9.0 ERROR: Patch 'proguard-android.txt' -> 'proguard-android-optimize.txt'
           find ~/.pub-cache -name "build.gradle" -exec sed -i "s/proguard-android.txt/proguard-android-optimize.txt/g" {} +
 
           # 6. Build the release Android APK
           flutter build apk --release
+
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-Release-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
