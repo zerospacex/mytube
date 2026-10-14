@@ -3,7 +3,7 @@ name: Build Unsigned iOS IPA & Android APK
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: # Allows manual 1-click triggering from the GitHub Actions tab
+  workflow_dispatch:
 
 jobs:
   # ==========================================
@@ -22,20 +22,18 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generate missing platform folders (if not committed)
+      - name: Generate full iOS project structure & preserve custom Info.plist
         run: |
-          if [ ! -d "ios" ]; then
-            flutter create --platforms=ios,android .
+          if [ -f "ios/Runner/Info.plist" ]; then
+            cp ios/Runner/Info.plist /tmp/Info.plist.bak
+          fi
+          flutter create --platforms=ios,android .
+          if [ -f "/tmp/Info.plist.bak" ]; then
+            cp /tmp/Info.plist.bak ios/Runner/Info.plist
           fi
 
       - name: Install Flutter dependencies
         run: flutter pub get
-
-      - name: Install CocoaPods
-        run: |
-          cd ios
-          pod install
-          cd ..
 
       - name: Build iOS Release (.app bundle without codesigning)
         run: flutter build ios --release --no-codesign
@@ -75,10 +73,14 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generate missing platform folders (if not committed)
+      - name: Generate full Android project structure & preserve AndroidManifest.xml
         run: |
-          if [ ! -d "android" ]; then
-            flutter create --platforms=ios,android .
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            cp android/app/src/main/AndroidManifest.xml /tmp/AndroidManifest.xml.bak
+          fi
+          flutter create --platforms=ios,android .
+          if [ -f "/tmp/AndroidManifest.xml.bak" ]; then
+            cp /tmp/AndroidManifest.xml.bak android/app/src/main/AndroidManifest.xml
           fi
 
       - name: Install Flutter dependencies
