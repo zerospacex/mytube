@@ -1,0 +1,94 @@
+name: Build Unsigned iOS IPA & Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # Allows manual 1-click triggering from the GitHub Actions tab
+
+jobs:
+  # ==========================================
+  # JOB 1: Build Unsigned iOS .ipa on macOS
+  # ==========================================
+  build-ios:
+    name: Build iOS Unsigned IPA
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Generate missing platform folders (if not committed)
+        run: |
+          if [ ! -d "ios" ]; then
+            flutter create --platforms=ios,android .
+          fi
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install
+          cd ..
+
+      - name: Build iOS Release (.app bundle without codesigning)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package .app into Unsigned .ipa
+        run: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          mv Runner.app Payload/
+          zip -r -9 YT-AdFree-Unsigned.ipa Payload
+
+      - name: Upload Unsigned IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOS-Unsigned-IPA
+          path: build/ios/iphoneos/YT-AdFree-Unsigned.ipa
+
+  # ==========================================
+  # JOB 2: Build Release Android .apk on Linux
+  # ==========================================
+  build-android:
+    name: Build Android Release APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Generate missing platform folders (if not committed)
+        run: |
+          if [ ! -d "android" ]; then
+            flutter create --platforms=ios,android .
+          fi
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Build Android APK
+        run: flutter build apk --release
+
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-Release-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
