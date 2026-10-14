@@ -22,18 +22,32 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generate full iOS project structure & preserve custom Info.plist
+      - name: Recreate clean iOS & Android scaffolding
         run: |
+          # Backup custom Info.plist and main.dart if they exist
           if [ -f "ios/Runner/Info.plist" ]; then
             cp ios/Runner/Info.plist /tmp/Info.plist.bak
           fi
-          flutter create --platforms=ios,android .
+          if [ -f "lib/main.dart" ]; then
+            cp lib/main.dart /tmp/main.dart.bak
+          fi
+
+          # Remove incomplete ios/android folders so flutter create builds a fresh Xcode project
+          rm -rf ios android
+
+          # Generate complete native project files
+          flutter create --org com.custom.ytadfree --project-name adfree_youtube --platforms=ios,android .
+
+          # Ensure flutter_inappwebview is registered in pubspec.yaml and triggers Podfile generation
+          flutter pub add flutter_inappwebview
+
+          # Restore your custom main.dart and Info.plist
+          if [ -f "/tmp/main.dart.bak" ]; then
+            cp /tmp/main.dart.bak lib/main.dart
+          fi
           if [ -f "/tmp/Info.plist.bak" ]; then
             cp /tmp/Info.plist.bak ios/Runner/Info.plist
           fi
-
-      - name: Install Flutter dependencies
-        run: flutter pub get
 
       - name: Build iOS Release (.app bundle without codesigning)
         run: flutter build ios --release --no-codesign
@@ -73,18 +87,25 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generate full Android project structure & preserve AndroidManifest.xml
+      - name: Recreate clean Android scaffolding
         run: |
           if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
             cp android/app/src/main/AndroidManifest.xml /tmp/AndroidManifest.xml.bak
           fi
-          flutter create --platforms=ios,android .
+          if [ -f "lib/main.dart" ]; then
+            cp lib/main.dart /tmp/main.dart.bak
+          fi
+
+          rm -rf android
+          flutter create --org com.custom.ytadfree --project-name adfree_youtube --platforms=android .
+          flutter pub add flutter_inappwebview
+
+          if [ -f "/tmp/main.dart.bak" ]; then
+            cp /tmp/main.dart.bak lib/main.dart
+          fi
           if [ -f "/tmp/AndroidManifest.xml.bak" ]; then
             cp /tmp/AndroidManifest.xml.bak android/app/src/main/AndroidManifest.xml
           fi
-
-      - name: Install Flutter dependencies
-        run: flutter pub get
 
       - name: Build Android APK
         run: flutter build apk --release
