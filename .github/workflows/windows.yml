@@ -7,15 +7,30 @@ on:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           flutter-version: '3.24.5'
           cache: true
-      - uses: NuGet/setup-nuget@v2
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install compatible CMake
+        shell: pwsh
+        run: |
+          python -m pip install cmake==3.31.6
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $cmakeBin = python -c "import cmake; print(cmake.CMAKE_BIN_DIR)"
+          $cmakeBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Check Windows build tools
+        shell: pwsh
+        run: |
+          flutter doctor -v
+          cmake --version
+          nuget help
       - name: Analyze and package Windows app
         shell: pwsh
         run: ./scripts/build-windows.ps1

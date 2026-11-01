@@ -20,7 +20,7 @@ Push-Location $buildRoot
 try {
     Invoke-Flutter pub get
     Invoke-Flutter analyze
-    Invoke-Flutter build windows --release
+    Invoke-Flutter build windows --release --verbose
     $release = Join-Path $buildRoot 'build/windows/x64/runner/Release'
     if (-not (Test-Path (Join-Path $release 'adfree_youtube.exe'))) { throw 'Expected executable was not produced.' }
     $artifacts = Join-Path $repoRoot 'artifacts'

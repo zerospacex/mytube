@@ -89,14 +89,21 @@ class _MusicScreenState extends State<MusicScreen> {
   setInterval(report, 1000);
   document.addEventListener('play', report, true);
   document.addEventListener('pause', report, true);
-  // Restrict ad handling to ad elements; never mute or accelerate song audio.
+  // Seek only while the player explicitly marks the current media as an ad.
+  // Never change volume or playback rate: these persist into the next song.
   const skipAds = () => {
     const button = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
     if (button) button.click();
+    const player = document.querySelector('.html5-video-player.ad-showing');
+    const media = player && player.querySelector('video, audio');
+    if (media && Number.isFinite(media.duration) && media.duration > 0) {
+      try { media.currentTime = media.duration; } catch (_) {}
+    }
   };
-  setInterval(skipAds, 750);
+  setInterval(skipAds, 400);
+  new MutationObserver(skipAds).observe(document.documentElement, {childList: true, subtree: true});
   const style = document.createElement('style');
-  style.textContent = '.ytp-ad-overlay-container, ytm-promoted-sparkles-web-renderer, ytm-companion-ad-renderer { display:none !important; }';
+  style.textContent = '.ytp-ad-overlay-container, ytm-promoted-sparkles-web-renderer, ytm-PromotedVideoRenderer, ytm-companion-ad-renderer { display:none !important; }';
   (document.head || document.documentElement).appendChild(style);
 })();
 ''';
@@ -178,7 +185,7 @@ class _MusicScreenState extends State<MusicScreen> {
                     allowsInlineMediaPlayback: true,
                     allowsPictureInPictureMediaPlayback: true,
                     contentBlockers: [ContentBlocker(
-                      trigger: ContentBlockerTrigger(urlFilter: r'.*(doubleclick\.net|googleadservices\.com|googlesyndication\.com)/.*'),
+                      trigger: ContentBlockerTrigger(urlFilter: r'.*(doubleclick\.net|googleadservices\.com|googlesyndication\.com|youtube\.com/api/stats/ads|youtube\.com/pagead/).*'),
                       action: ContentBlockerAction(type: ContentBlockerActionType.BLOCK),
                     )],
                   ),
