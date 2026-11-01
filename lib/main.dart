@@ -1,124 +1,245 @@
 import 'dart:collection';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
-void main() {
+WebViewEnvironment? _windowsEnvironment;
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const AdFreeYouTubeApp());
-}
-
-class AdFreeYouTubeApp extends StatelessWidget {
-  const AdFreeYouTubeApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(),
-      home: const YouTubeWrapperScreen(),
-    );
+  if (Platform.isWindows) {
+    try {
+      final localData = Platform.environment['LOCALAPPDATA'];
+      if (localData == null) throw StateError('Local application data is unavailable.');
+      final folder = Directory('$localData/MyTubeMusic/WebView2');
+      await folder.create(recursive: true);
+      _windowsEnvironment = await WebViewEnvironment.create(
+        settings: WebViewEnvironmentSettings(userDataFolder: folder.path),
+      );
+    } catch (_) {
+      runApp(MaterialApp(
+        theme: ThemeData.dark(),
+        home: const Scaffold(body: Center(child: Padding(
+          padding: EdgeInsets.all(32),
+          child: SelectableText('MyTube Music could not start its browser. Install or repair Microsoft Edge WebView2 Runtime, check that your local application data folder is writable, then reopen the app.\n\nhttps://developer.microsoft.com/microsoft-edge/webview2/'),
+        ))),
+      ));
+      return;
+    }
   }
+  runApp(const MusicApp());
 }
 
-class YouTubeWrapperScreen extends StatefulWidget {
-  const YouTubeWrapperScreen({super.key});
+class MusicApp extends StatelessWidget {
+  const MusicApp({super.key});
 
   @override
-  State<YouTubeWrapperScreen> createState() => _YouTubeWrapperScreenState();
+  Widget build(BuildContext context) => MaterialApp(
+        title: 'MyTube Music',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          brightness: Brightness.dark,
+          colorSchemeSeed: const Color(0xFFB4F272),
+          scaffoldBackgroundColor: const Color(0xFF101310),
+          useMaterial3: true,
+        ),
+        home: const MusicScreen(),
+      );
 }
 
-class _YouTubeWrapperScreenState extends State<YouTubeWrapperScreen> {
-  InAppWebViewController? _webViewController;
+class MusicScreen extends StatefulWidget {
+  const MusicScreen({super.key});
 
-  // JavaScript injected into the DOM to strip ad slots, auto-skip video ads,
-  // and prevent YouTube from pausing audio when the screen locks.
-  static const String _adBlockAndBgScript = '''
-    (function() {
-      // 1. Spoof Page Visibility API so background audio keeps playing
-      Object.defineProperty(document, 'hidden', { get: () => false });
-      Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
-      window.addEventListener('visibilitychange', (e) => e.stopImmediatePropagation(), true);
+  @override
+  State<MusicScreen> createState() => _MusicScreenState();
+}
 
-      // 2. Inject CSS to hide companion banners and promoted feed cards
-      const style = document.createElement('style');
-      style.innerHTML = `
-        ytm-promoted-sparkles-web-renderer,
-        ytm-PromotedVideoRenderer,
-        ytm-companion-ad-renderer,
-        .ytp-ad-overlay-container,
-        .ad-interrupting { display: none !important; }
-      `;
-      document.head.appendChild(style);
+class _MusicScreenState extends State<MusicScreen> {
+  InAppWebViewController? _web;
+  final _search = TextEditingController();
+  double _progress = 0;
+  String? _error;
+  String _title = 'Choose a song to start listening';
+  bool _playing = false;
+  bool _hasMedia = false;
+  int _tab = 0;
 
-      // 3. Watch player state to auto-skip or fast-forward video ads
-      const skipAds = () => {
-        const skipBtn = document.querySelector(
-          '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button'
-        );
-        if (skipBtn) skipBtn.click();
+  // Install once per document. Observe metadata without transferring audio or
+  // downloading media. Playback quality remains controlled by YouTube Music.
+  static const _playerScript = r'''
+(() => {
+  if (window.__mytubeInstalled) return;
+  window.__mytubeInstalled = true;
+  let previous = '';
+  const report = () => {
+    const media = document.querySelector('video, audio');
+    const metadata = navigator.mediaSession && navigator.mediaSession.metadata;
+    const state = {
+      title: metadata ? [metadata.title, metadata.artist].filter(Boolean).join(' · ') : document.title,
+      playing: !!media && !media.paused && !media.ended,
+      hasMedia: !!media && !!media.currentSrc
+    };
+    const serialized = JSON.stringify(state);
+    if (serialized !== previous && window.flutter_inappwebview) {
+      window.flutter_inappwebview.callHandler('playerState', state);
+      previous = serialized;
+    }
+  };
+  setInterval(report, 1000);
+  document.addEventListener('play', report, true);
+  document.addEventListener('pause', report, true);
+  // Restrict ad handling to ad elements; never mute or accelerate song audio.
+  const skipAds = () => {
+    const button = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
+    if (button) button.click();
+  };
+  setInterval(skipAds, 750);
+  const style = document.createElement('style');
+  style.textContent = '.ytp-ad-overlay-container, ytm-promoted-sparkles-web-renderer, ytm-companion-ad-renderer { display:none !important; }';
+  (document.head || document.documentElement).appendChild(style);
+})();
+''';
 
-        const player = document.querySelector('.html5-video-player.ad-showing');
-        const video = document.querySelector('video');
-        if (player && video) {
-          video.muted = true;
-          if (!isNaN(video.duration) && video.duration > 0) {
-            video.currentTime = video.duration;
-          } else {
-            video.playbackRate = 16.0;
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load(String url) async {
+    setState(() { _error = null; _progress = 0; });
+    await _web?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+  }
+
+  Future<void> _control(String action) async {
+    final result = await _web?.evaluateJavascript(source: action == 'toggle'
+        ? "(async () => { const m = document.querySelector('video, audio'); if (!m) return false; try { if(m.paused) await m.play(); else m.pause(); return true; } catch (_) { return false; } })()"
+        : "(() => { const b = document.querySelector('ytmusic-player-bar .${action == 'next' ? 'next' : 'previous'}-button'); if (!b || b.disabled) return false; b.click(); return true; })()");
+    if (mounted && result != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Use the player on the page for this action.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, result) async {
+          if (didPop) return;
+          if (await _web?.canGoBack() ?? false) {
+            await _web?.goBack();
+          } else if (Platform.isAndroid) {
+            await SystemNavigator.pop();
           }
-        }
-      };
-
-      const observer = new MutationObserver(skipAds);
-      observer.observe(document.documentElement, { childList: true, subtree: true });
-      setInterval(skipAds, 400);
-    })();
-  ''';
-
-  @override
-  Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) return;
-        if (_webViewController != null && await _webViewController!.canGoBack()) {
-          await _webViewController!.goBack();
-        } else {
-          SystemNavigator.pop();
-        }
-      },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: SafeArea(
-          child: InAppWebView(
-            initialUrlRequest: URLRequest(url: WebUri('https://m.youtube.com')),
-            initialSettings: InAppWebViewSettings(
-              javaScriptEnabled: true,
-              mediaPlaybackRequiresUserGesture: false,
-              allowsInlineMediaPlayback: true,
-              allowsPictureInPictureMediaPlayback: true,
-              contentBlockers: [
-                ContentBlocker(
-                  trigger: ContentBlockerTrigger(
-                    urlFilter: ".*(doubleclick\\.net|googleadservices\\.com|googlesyndication\\.com|youtube\\.com/api/stats/ads|youtube\\.com/pagead/).*",
+        },
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Row(children: [Icon(Icons.graphic_eq), SizedBox(width: 10), Text('MyTube Music')]),
+            actions: [IconButton(
+              tooltip: 'Playback information', icon: const Icon(Icons.info_outline),
+              onPressed: () => showDialog<void>(context: context, builder: (context) => AlertDialog(
+                title: const Text('Made for listening'),
+                content: const Text('Search music, explore playlists, and use your YouTube library. Audio quality is managed by YouTube Music; choose the highest available quality in its settings.\n\nAd skipping is best effort. Background playback, lock-screen controls, and available quality depend on your account, device, and YouTube. This app does not upgrade the source audio.'),
+                actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Got it'))],
+              )),
+            )],
+          ),
+          body: SafeArea(
+            top: false,
+            child: Column(children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: TextField(
+                  controller: _search,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: 'Songs, artists, albums',
+                    prefixIcon: const Icon(Icons.search),
+                    filled: true,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(28), borderSide: BorderSide.none),
                   ),
-                  action: ContentBlockerAction(type: ContentBlockerActionType.BLOCK),
+                  onSubmitted: (query) {
+                    if (query.trim().isEmpty) return;
+                    FocusScope.of(context).unfocus();
+                    _load(Uri.https('music.youtube.com', '/search', {'q': query.trim()}).toString());
+                  },
                 ),
-              ],
-            ),
-            initialUserScripts: UnmodifiableListView<UserScript>([
-              UserScript(
-                source: _adBlockAndBgScript,
-                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              ),
+              if (_progress < 1 && _error == null) LinearProgressIndicator(value: _progress > 0 ? _progress : null),
+              Expanded(child: Stack(children: [
+                InAppWebView(
+                  webViewEnvironment: _windowsEnvironment,
+                  initialUrlRequest: URLRequest(url: WebUri('https://music.youtube.com')),
+                  initialSettings: InAppWebViewSettings(
+                    javaScriptEnabled: true,
+                    mediaPlaybackRequiresUserGesture: false,
+                    allowsInlineMediaPlayback: true,
+                    allowsPictureInPictureMediaPlayback: true,
+                    contentBlockers: [ContentBlocker(
+                      trigger: ContentBlockerTrigger(urlFilter: r'.*(doubleclick\.net|googleadservices\.com|googlesyndication\.com)/.*'),
+                      action: ContentBlockerAction(type: ContentBlockerActionType.BLOCK),
+                    )],
+                  ),
+                  initialUserScripts: UnmodifiableListView<UserScript>([
+                    UserScript(source: _playerScript, injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END),
+                  ]),
+                  onWebViewCreated: (controller) {
+                    _web = controller;
+                    controller.addJavaScriptHandler(handlerName: 'playerState', callback: (args) {
+                      if (!mounted || args.isEmpty || args.first is! Map) return;
+                      final state = args.first as Map;
+                      setState(() {
+                        _title = state['title'] is String ? state['title'] as String : _title;
+                        _playing = state['playing'] == true;
+                        _hasMedia = state['hasMedia'] == true;
+                      });
+                    });
+                  },
+                  onLoadStart: (_, url) { if (mounted) setState(() { _error = null; _progress = 0; }); },
+                  onProgressChanged: (_, progress) { if (mounted) setState(() => _progress = progress / 100); },
+                  onReceivedError: (_, request, error) {
+                    if (mounted && request.isForMainFrame == true) setState(() => _error = 'Unable to load music. Check your connection and try again.');
+                  },
+                  onReceivedHttpError: (_, request, response) {
+                    if (mounted && request.isForMainFrame == true) setState(() => _error = 'YouTube Music returned an error (${response.statusCode}).');
+                  },
+                ),
+                if (_error != null) Positioned.fill(child: ColoredBox(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  child: Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [const Icon(Icons.wifi_off, size: 40), const SizedBox(height: 16), Text(_error!, textAlign: TextAlign.center), const SizedBox(height: 16), FilledButton.icon(onPressed: () { setState(() => _error = null); _web?.reload(); }, icon: const Icon(Icons.refresh), label: const Text('Try again'))],
+                  ))),
+                )),
+              ])),
+              if (_hasMedia) Material(
+                color: const Color(0xFF253020),
+                child: ListTile(
+                  leading: const Icon(Icons.music_note),
+                  title: Text(_title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    IconButton(tooltip: 'Previous song', onPressed: () => _control('previous'), icon: const Icon(Icons.skip_previous)),
+                    IconButton(tooltip: _playing ? 'Pause' : 'Play', onPressed: () => _control('toggle'), icon: Icon(_playing ? Icons.pause : Icons.play_arrow)),
+                    IconButton(tooltip: 'Next song', onPressed: () => _control('next'), icon: const Icon(Icons.skip_next)),
+                  ]),
+                ),
               ),
             ]),
-            onWebViewCreated: (controller) {
-              _webViewController = controller;
+          ),
+          bottomNavigationBar: NavigationBar(
+            selectedIndex: _tab,
+            onDestinationSelected: (index) {
+              setState(() => _tab = index);
+              _load(['https://music.youtube.com', 'https://music.youtube.com/explore', 'https://music.youtube.com/library'][index]);
             },
+            destinations: const [
+              NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Listen'),
+              NavigationDestination(icon: Icon(Icons.explore_outlined), selectedIcon: Icon(Icons.explore), label: 'Explore'),
+              NavigationDestination(icon: Icon(Icons.library_music_outlined), selectedIcon: Icon(Icons.library_music), label: 'Library'),
+            ],
           ),
         ),
-      ),
-    );
-  }
+      );
 }

@@ -1,15 +1,16 @@
 name: adfree_youtube
-description: Custom Ad-Free YouTube WebView Wrapper with Background Playback.
+description: Lightweight YouTube Music player for mobile and Windows.
 publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.2.0 <4.0.0'
+  sdk: '>=3.5.0 <4.0.0'
+  flutter: '>=3.24.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  flutter_inappwebview: ^6.0.0
+  flutter_inappwebview: 6.1.5
 
 dev_dependencies:
   flutter_test:
