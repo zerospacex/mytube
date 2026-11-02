@@ -13,13 +13,15 @@ foreach ($tool in @('flutter', 'nuget')) {
 }
 Invoke-Flutter create --org com.custom.ytadfree --project-name adfree_youtube --platforms=windows $buildRoot
 Copy-Item (Join-Path $repoRoot 'pubspec.yaml') (Join-Path $buildRoot 'pubspec.yaml') -Force
-Copy-Item (Join-Path $repoRoot 'lib/main.dart') (Join-Path $buildRoot 'lib/main.dart') -Force
+Copy-Item (Join-Path $repoRoot 'lib/*.dart') (Join-Path $buildRoot 'lib') -Force
 # The template test targets the template counter app, not this application.
 Remove-Item (Join-Path $buildRoot 'test/widget_test.dart')
+Copy-Item (Join-Path $repoRoot 'test/*_test.dart') (Join-Path $buildRoot 'test') -Force
 Push-Location $buildRoot
 try {
     Invoke-Flutter pub get
     Invoke-Flutter analyze
+    Invoke-Flutter test
     Invoke-Flutter build windows --release --verbose
     $release = Join-Path $buildRoot 'build/windows/x64/runner/Release'
     if (-not (Test-Path (Join-Path $release 'adfree_youtube.exe'))) { throw 'Expected executable was not produced.' }

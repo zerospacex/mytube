@@ -27,7 +27,7 @@ than running the destructive regeneration commands in CI against local changes:
 ```sh
 flutter create --org com.custom.ytadfree --project-name adfree_youtube --platforms=android /tmp/mytube-dev
 cp pubspec.yaml /tmp/mytube-dev/pubspec.yaml
-cp lib/main.dart /tmp/mytube-dev/lib/main.dart
+cp lib/*.dart /tmp/mytube-dev/lib/
 cp android/app/src/main/AndroidManifest.xml /tmp/mytube-dev/android/app/src/main/AndroidManifest.xml
 cd /tmp/mytube-dev
 rm test/widget_test.dart
@@ -122,3 +122,17 @@ change, then unlock and disable it. Check that the notification disappears and
 play/pause still works. Repeat with the option off and after removing the app
 from recent apps. Actual device playback and native builds remain unverified in
 this Linux environment.
+
+
+### Windows blank window at launch
+
+Startup now paints the Flutter interface before waiting for WebView2. It displays
+progress while checking the runtime and creating the browser profile. Initialization
+errors or a 20-second timeout show recovery steps and copyable startup details.
+Close and reopen the app after installing or repairing WebView2. If the error
+persists, share the displayed startup details. A gray window with no loading
+interface in this version requires further investigation of the native runner or
+Flutter renderer. This change has not been tested on a Windows machine.
+
+The Windows packaging script runs `flutter test` (including startup success,
+failure, and timeout tests) before creating the release archive.

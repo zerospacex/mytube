@@ -3,32 +3,29 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'startup.dart';
 
 WebViewEnvironment? _windowsEnvironment;
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  if (Platform.isWindows) {
-    try {
-      final localData = Platform.environment['LOCALAPPDATA'];
-      if (localData == null) throw StateError('Local application data is unavailable.');
-      final folder = Directory('$localData/MyTubeMusic/WebView2');
-      await folder.create(recursive: true);
-      _windowsEnvironment = await WebViewEnvironment.create(
-        settings: WebViewEnvironmentSettings(userDataFolder: folder.path),
-      );
-    } catch (_) {
-      runApp(MaterialApp(
-        theme: ThemeData.dark(),
-        home: const Scaffold(body: Center(child: Padding(
-          padding: EdgeInsets.all(32),
-          child: SelectableText('MyTube Music could not start its browser. Install or repair Microsoft Edge WebView2 Runtime, check that your local application data folder is writable, then reopen the app.\n\nhttps://developer.microsoft.com/microsoft-edge/webview2/'),
-        ))),
-      ));
-      return;
-    }
-  }
   runApp(const MusicApp());
+}
+
+Future<void> _initializeWindowsBrowser() async {
+  final version = await WebViewEnvironment.getAvailableVersion();
+  if (version == null || version.isEmpty) {
+    throw StateError('Microsoft Edge WebView2 Runtime was not found.');
+  }
+  final localData = Platform.environment['LOCALAPPDATA'];
+  if (localData == null) {
+    throw StateError('Local application data is unavailable.');
+  }
+  final folder = Directory('$localData/MyTubeMusic/WebView2');
+  await folder.create(recursive: true);
+  _windowsEnvironment = await WebViewEnvironment.create(
+    settings: WebViewEnvironmentSettings(userDataFolder: folder.path),
+  );
 }
 
 class MusicApp extends StatelessWidget {
@@ -44,7 +41,12 @@ class MusicApp extends StatelessWidget {
           scaffoldBackgroundColor: const Color(0xFF101310),
           useMaterial3: true,
         ),
-        home: const MusicScreen(),
+        home: Platform.isWindows
+            ? BrowserStartup(
+                initialize: _initializeWindowsBrowser,
+                child: const MusicScreen(),
+              )
+            : const MusicScreen(),
       );
 }
 
