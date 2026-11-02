@@ -42,9 +42,9 @@ class MusicApp extends StatelessWidget {
           useMaterial3: true,
         ),
         home: Platform.isWindows
-            ? BrowserStartup(
+            ? const BrowserStartup(
                 initialize: _initializeWindowsBrowser,
-                child: const MusicScreen(),
+                child: MusicScreen(),
               )
             : const MusicScreen(),
       );
