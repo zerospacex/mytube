@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'startup.dart';
+import 'mobile_media_controls.dart';
 
 WebViewEnvironment? _windowsEnvironment;
 
@@ -60,6 +61,31 @@ class MusicScreen extends StatefulWidget {
 class _MusicScreenState extends State<MusicScreen> {
   InAppWebViewController? _web;
   final _search = TextEditingController();
+  late final MobileMediaControls _mobileControls;
+  bool _mediaErrorShown = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _mobileControls = MobileMediaControls(
+      enabled: Platform.isAndroid || Platform.isIOS,
+      onCommand: (action, position) => _control(action, position: position),
+    )..attach();
+  }
+
+  Future<void> _publishMedia(Map<String, dynamic> state) async {
+    try {
+      await _mobileControls.update({...state, 'background': _backgroundEnabled});
+    } catch (_) {
+      if (mounted && !_mediaErrorShown) {
+        _mediaErrorShown = true;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('System music controls are unavailable. You can still use the app player.'),
+        ));
+      }
+    }
+  }
+
   double _progress = 0;
   String? _error;
   String _title = 'Choose a song to start listening';
@@ -131,6 +157,10 @@ class _MusicScreenState extends State<MusicScreen> {
     const metadata = navigator.mediaSession && navigator.mediaSession.metadata;
     const state = {
       title: metadata ? [metadata.title, metadata.artist].filter(Boolean).join(' · ') : document.title,
+      trackTitle: metadata && metadata.title ? metadata.title : document.title,
+      artist: metadata && metadata.artist ? metadata.artist : '',
+      duration: media && Number.isFinite(media.duration) ? Math.round(media.duration * 1000) : 0,
+      position: media && Number.isFinite(media.currentTime) ? Math.round(media.currentTime * 1000) : 0,
       playing: !!media && !media.paused && !media.ended,
       hasMedia: !!media && !!media.currentSrc
     };
@@ -139,6 +169,29 @@ class _MusicScreenState extends State<MusicScreen> {
       window.flutter_inappwebview.callHandler('playerState', state);
       previous = serialized;
     }
+  };
+  window.__mytubeControl = async (action, position) => {
+    const media = document.querySelector('video, audio');
+    if (['play', 'pause', 'toggle', 'seek'].includes(action)) {
+      if (!media) return false;
+      try {
+        if (action === 'seek') {
+          if (!Number.isFinite(position) || position < 0 || !Number.isFinite(media.duration)) return false;
+          media.currentTime = Math.min(position, media.duration);
+        } else if (action === 'pause' || (action === 'toggle' && !media.paused)) {
+          media.pause();
+        } else {
+          await media.play();
+        }
+        report();
+        return true;
+      } catch (_) { return false; }
+    }
+    if (!['next', 'previous'].includes(action)) return false;
+    const button = document.querySelector('ytmusic-player-bar .' + action + '-button');
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
   };
   setInterval(report, 1000);
   document.addEventListener('play', report, true);
@@ -164,9 +217,7 @@ class _MusicScreenState extends State<MusicScreen> {
 
   @override
   void dispose() {
-    if (Platform.isAndroid && _backgroundEnabled) {
-      _backgroundChannel.invokeMethod<void>('setEnabled', false).catchError((_) {});
-    }
+    _mobileControls.dispose().catchError((_) {});
     _search.dispose();
     super.dispose();
   }
@@ -176,14 +227,23 @@ class _MusicScreenState extends State<MusicScreen> {
     await _web?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
   }
 
-  Future<void> _control(String action) async {
-    final result = await _web?.evaluateJavascript(source: action == 'toggle'
-        ? "(async () => { const m = document.querySelector('video, audio'); if (!m) return false; try { if(m.paused) await m.play(); else m.pause(); return true; } catch (_) { return false; } })()"
-        : "(() => { const b = document.querySelector('ytmusic-player-bar .${action == 'next' ? 'next' : 'previous'}-button'); if (!b || b.disabled) return false; b.click(); return true; })()");
-    if (mounted && result != true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Use the player on the page for this action.')),
+  Future<void> _control(String action, {double? position}) async {
+    try {
+      final result = await _web?.callAsyncJavaScript(
+        functionBody: 'if (!window.__mytubeControl) return false; return await window.__mytubeControl(action, position);',
+        arguments: {'action': action, 'position': position},
       );
+      if (mounted && result?.value != true) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Use the player on the page for this action.'),
+        ));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Player is not ready. Open a song and try again.'),
+        ));
+      }
     }
   }
 
@@ -267,15 +327,19 @@ class _MusicScreenState extends State<MusicScreen> {
                     _web = controller;
                     controller.addJavaScriptHandler(handlerName: 'playerState', callback: (args) {
                       if (!mounted || args.isEmpty || args.first is! Map) return;
-                      final state = args.first as Map;
+                      final state = Map<String, dynamic>.from(args.first as Map);
                       setState(() {
                         _title = state['title'] is String ? state['title'] as String : _title;
                         _playing = state['playing'] == true;
                         _hasMedia = state['hasMedia'] == true;
                       });
+                      _publishMedia(state);
                     });
                   },
-                  onLoadStart: (_, url) { if (mounted) setState(() { _error = null; _progress = 0; }); },
+                  onLoadStart: (_, url) {
+                    _publishMedia({'hasMedia': false});
+                    if (mounted) setState(() { _error = null; _progress = 0; _hasMedia = false; _playing = false; });
+                  },
                   onLoadStop: (controller, url) async {
                     await controller.evaluateJavascript(
                       source: 'window.__mytubeBackground = $_backgroundEnabled;',

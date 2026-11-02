@@ -95,8 +95,8 @@ the player. The setting lasts for the current app session and defaults to off.
   notification (allow notifications when prompted) and a partial CPU wake lock (the screen can still turn off). Turn
   the option off when finished to release the lock and stop the service. Removing
   the app from recent apps stops the service; force-stop or OS process termination
-  ends playback. The notification opens the app to manage the option. Keeping the
-  service enabled while paused still uses background resources.
+  ends playback. The notification opens the app to manage the option. The CPU wake lock is released when playback pauses;
+  the media notification remains available for resuming playback.
 - Windows: the option suppresses website visibility-based pauses. In Windows
   **Settings → System → Power & battery → Screen and sleep**, allow the display to
   turn off but prevent the PC from sleeping while listening. This does not enable
@@ -136,3 +136,39 @@ Flutter renderer. This change has not been tested on a Windows machine.
 
 The Windows packaging script runs `flutter test` (including startup success,
 failure, and timeout tests) before creating the release archive.
+
+
+## Mobile notification and lock-screen controls
+
+Start a song to publish the title, artist, duration, position, and playback state
+to the system music controls. Android uses a media-style notification and media
+session; iOS uses Now Playing in Control Center and on the lock screen. Controls
+include play/pause, previous, next, and seeking where the OS displays a progress
+slider. A queue must exist on the page for next/previous to work. Repeated Play or
+Pause commands are explicit operations, so they do not accidentally toggle back.
+The page remains the only source of audio.
+
+On Android, allow notifications if prompted. Controls are created when playback
+starts, remain available while paused, and are removed when the page unloads or
+the app closes. Enable **Background playback** for screen-off listening. Disabling
+that switch releases the CPU wake lock but keeps media controls for the loaded
+song. System notification/privacy settings determine how the controls appear.
+On iOS, no notification permission is needed for Now Playing controls; the native
+bridge configures a playback audio session when a song starts. WebView/account
+restrictions can still interrupt playback while locked; this is not a native
+streaming engine, and iOS background listening remains unverified.
+
+For a local iOS project generated with Flutter, copy
+`platform/ios/AppDelegate.swift` over `ios/Runner/AppDelegate.swift` along with the
+repository `Info.plist`. The GitHub iOS job does this after project generation.
+Android native sources are installed using the steps above.
+
+Tests: `node test/player_controls_test.cjs` exercises actual injected player code
+for metadata, millisecond conversion, play/pause, seeking, and queue buttons.
+`flutter test test/mobile_media_controls_test.dart` covers the native channel
+bridge, invalid commands, cleanup, and exclusion of desktop platforms. Both mobile
+CI jobs run these checks before building. Native media-session behavior needs
+verification on Android and iOS devices: lock the screen, pause and resume, skip
+both directions with a queue, seek, unlock, navigate away, and remove the app.
+Confirm the controls track the actual song and disappear when no media is loaded.
+No native builds or device checks have been run in this Linux workspace.
