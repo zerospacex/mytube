@@ -105,6 +105,11 @@ jobs:
             cp /tmp/AndroidManifest.xml.bak android/app/src/main/AndroidManifest.xml
           fi
 
+          # Install native background playback support after project generation.
+          native_dir=android/app/src/main/kotlin/com/custom/ytadfree/adfree_youtube
+          mkdir -p "$native_dir"
+          cp platform/android/*.kt "$native_dir/"
+
           # 4. Add plugin and download packages to pub-cache
           flutter pub add flutter_inappwebview
           flutter pub get

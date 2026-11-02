@@ -62,6 +62,58 @@ class _MusicScreenState extends State<MusicScreen> {
   String? _error;
   String _title = 'Choose a song to start listening';
   bool _playing = false;
+  bool _backgroundEnabled = false;
+  bool _changingBackground = false;
+  static const _backgroundChannel = MethodChannel('mytube/background');
+
+  // Keep the website's visibility checks from stopping music when requested.
+  // Native OS suspension and account restrictions remain outside this script.
+  static const _backgroundScript = r'''
+(() => {
+  if (window.__mytubeVisibilityInstalled) return;
+  window.__mytubeVisibilityInstalled = true;
+  window.__mytubeBackground = false;
+  const hidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+  const visibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
+  if (hidden && hidden.get) Object.defineProperty(document, 'hidden', {
+    configurable: true,
+    get: () => window.__mytubeBackground ? false : hidden.get.call(document)
+  });
+  if (visibility && visibility.get) Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => window.__mytubeBackground ? 'visible' : visibility.get.call(document)
+  });
+  window.addEventListener('visibilitychange', event => {
+    if (window.__mytubeBackground) event.stopImmediatePropagation();
+  }, true);
+})();
+''';
+
+  Future<void> _setBackground(bool enabled) async {
+    if (_changingBackground) return;
+    setState(() => _changingBackground = true);
+    try {
+      if (Platform.isAndroid) {
+        await _backgroundChannel.invokeMethod<void>('setEnabled', enabled);
+      }
+      await _web?.evaluateJavascript(
+        source: 'window.__mytubeBackground = $enabled;',
+      );
+      if (mounted) setState(() => _backgroundEnabled = enabled);
+    } catch (_) {
+      if (Platform.isAndroid && enabled) {
+        try { await _backgroundChannel.invokeMethod<void>('setEnabled', false); } catch (_) {}
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not change background playback. Please try again.'),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _changingBackground = false);
+    }
+  }
+
   bool _hasMedia = false;
   int _tab = 0;
 
@@ -110,6 +162,9 @@ class _MusicScreenState extends State<MusicScreen> {
 
   @override
   void dispose() {
+    if (Platform.isAndroid && _backgroundEnabled) {
+      _backgroundChannel.invokeMethod<void>('setEnabled', false).catchError((_) {});
+    }
     _search.dispose();
     super.dispose();
   }
@@ -174,6 +229,16 @@ class _MusicScreenState extends State<MusicScreen> {
                   },
                 ),
               ),
+              if (Platform.isAndroid || Platform.isWindows)
+                SwitchListTile.adaptive(
+                  secondary: const Icon(Icons.headphones),
+                  title: const Text('Background playback'),
+                  subtitle: Text(Platform.isWindows
+                      ? 'Listen with display off. Keep Windows awake in Power settings.'
+                      : 'Listen with screen off. Turn off here when finished.'),
+                  value: _backgroundEnabled,
+                  onChanged: _changingBackground ? null : _setBackground,
+                ),
               if (_progress < 1 && _error == null) LinearProgressIndicator(value: _progress > 0 ? _progress : null),
               Expanded(child: Stack(children: [
                 InAppWebView(
@@ -190,6 +255,10 @@ class _MusicScreenState extends State<MusicScreen> {
                     )],
                   ),
                   initialUserScripts: UnmodifiableListView<UserScript>([
+                    UserScript(
+                      source: '$_backgroundScript\nwindow.__mytubeBackground = $_backgroundEnabled;',
+                      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                    ),
                     UserScript(source: _playerScript, injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END),
                   ]),
                   onWebViewCreated: (controller) {
@@ -205,6 +274,11 @@ class _MusicScreenState extends State<MusicScreen> {
                     });
                   },
                   onLoadStart: (_, url) { if (mounted) setState(() { _error = null; _progress = 0; }); },
+                  onLoadStop: (controller, url) async {
+                    await controller.evaluateJavascript(
+                      source: 'window.__mytubeBackground = $_backgroundEnabled;',
+                    );
+                  },
                   onProgressChanged: (_, progress) { if (mounted) setState(() => _progress = progress / 100); },
                   onReceivedError: (_, request, error) {
                     if (mounted && request.isForMainFrame == true) setState(() => _error = 'Unable to load music. Check your connection and try again.');

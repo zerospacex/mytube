@@ -1,0 +1,34 @@
+// Run with: node test/background_playback_test.cjs
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const source = fs.readFileSync(path.join(__dirname, '../lib/main.dart'), 'utf8');
+const script = source.split("static const _backgroundScript = r'''\n")[1].split("''';")[0];
+let hidden = false;
+class Document {}
+Object.defineProperty(Document.prototype, 'hidden', {get: () => hidden});
+Object.defineProperty(Document.prototype, 'visibilityState', {get: () => hidden ? 'hidden' : 'visible'});
+const document = new Document();
+const listeners = [];
+const window = {addEventListener(name, handler) { listeners.push(handler); }};
+const context = {window, document, Document};
+vm.runInNewContext(script, context);
+assert.equal(document.hidden, false);
+hidden = true;
+assert.equal(document.hidden, true, 'disabled: native hidden state passes through');
+assert.equal(document.visibilityState, 'hidden');
+window.__mytubeBackground = true;
+assert.equal(document.hidden, false, 'enabled: screen-off does not report hidden');
+assert.equal(document.visibilityState, 'visible');
+let stopped = false;
+listeners[0]({stopImmediatePropagation() { stopped = true; }});
+assert.equal(stopped, true);
+window.__mytubeBackground = false;
+stopped = false;
+listeners[0]({stopImmediatePropagation() { stopped = true; }});
+assert.equal(stopped, false, 'disabled: visibility events pass through');
+assert.equal(document.hidden, true, 'disabling restores native visibility');
+vm.runInNewContext(script, context);
+assert.equal(listeners.length, 1, 'reinstallation adds no duplicate listeners');
+console.log('Passed background visibility enable/disable and installation checks.');

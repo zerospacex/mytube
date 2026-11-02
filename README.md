@@ -85,3 +85,40 @@ pause/next/previous, resize and minimize the window, reopen to check browser
 persistence, and verify connection-error recovery. Windows playback and packaging
 have not yet been validated on a Windows machine. Mobile picture-in-picture
 settings do not guarantee Windows picture-in-picture or playback during PC sleep.
+
+## Background playback
+
+On Android or Windows, start a song, then turn on **Background playback** above
+the player. The setting lasts for the current app session and defaults to off.
+
+- Android: the option starts a media-playback foreground service with an ongoing
+  notification (allow notifications when prompted) and a partial CPU wake lock (the screen can still turn off). Turn
+  the option off when finished to release the lock and stop the service. Removing
+  the app from recent apps stops the service; force-stop or OS process termination
+  ends playback. The notification opens the app to manage the option. Keeping the
+  service enabled while paused still uses background resources.
+- Windows: the option suppresses website visibility-based pauses. In Windows
+  **Settings → System → Power & battery → Screen and sleep**, allow the display to
+  turn off but prevent the PC from sleeping while listening. This does not enable
+  playback during sleep, hibernation, or shutdown.
+- iOS: this switch is not exposed; dependable iOS background playback has not been
+  implemented or verified.
+
+Both platforms retain the WebView as the audio source. Website/account limits,
+WebView behavior, and manufacturer battery policies can still interrupt playback;
+this is not a separate native streaming engine. Test on the target device before
+relying on screen-off playback.
+
+For local Android builds, after generating the temporary project described above,
+copy `platform/android/*.kt` into
+`android/app/src/main/kotlin/com/custom/ytadfree/adfree_youtube/` in that project,
+replacing the generated `MainActivity.kt`. Copy the repository Android manifest
+as well. The GitHub APK workflow performs these steps automatically.
+
+Validation: `node test/background_playback_test.cjs` checks that the visibility
+handling enables, disables, and installs once. On a device, start a song, enable
+background playback, lock the screen for several minutes and across a track
+change, then unlock and disable it. Check that the notification disappears and
+play/pause still works. Repeat with the option off and after removing the app
+from recent apps. Actual device playback and native builds remain unverified in
+this Linux environment.
